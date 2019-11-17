@@ -60,12 +60,12 @@ def main():
 
     # Set server folders 
     # TODO: add to config file
-    test_server_1 = Server(Mod.CSGO, 'C:\\Games\\SteamDev\\pyFastDL Testing\\server1\\csgo')
+    # test_server_1 = Server(Mod.CSGO, 'C:\\Games\\SteamDev\\pyFastDL Testing\\server1\\csgo')
     test_server_2 = Server(Mod.CSGO, 'C:\\Games\\SteamDev\\pyFastDL Testing\\server2\\csgo')
     test_fastdl = FastDL(Mod.CSGO, 'C:\\Games\\SteamDev\\pyFastDL Testing\\fastdl.example.com\\csgo')
 
     server_fastdl_mappings = {}
-    server_fastdl_mappings.setdefault(test_fastdl, []).append(test_server_1)
+    # server_fastdl_mappings.setdefault(test_fastdl, []).append(test_server_1)
     server_fastdl_mappings.setdefault(test_fastdl, []).append(test_server_2)
 
     # Loop over servers
@@ -99,7 +99,7 @@ def main():
                                 if s == server:
                                     continue
                                 
-                                test_source_file = s.server_path + folder_rule.path + os.sep + file
+                                test_source_file = s.server_path + folder_rule.path + remove_prefix(root, folder_path) + os.sep + file
                                 if os.path.exists(test_source_file) and os.path.isfile(test_source_file):
                                     test_source_file_md5 = md5sum(test_source_file)
                                     if test_source_file_md5 != source_file_md5:
@@ -160,9 +160,6 @@ def main():
 
                                 # Copy over modified time
                                 os.utime(dest_file, (source_file_mtime, source_file_mtime))
-                        
-                else:
-                    root, subdirs, files = next(os.walk(folder_path))
 
     # Delete old files that no longer exist on any server as sourcefile
     for fastdl, servers in server_fastdl_mappings.items():
@@ -190,10 +187,10 @@ def main():
                         file_exists_on_server = False
 
                         for server in servers:
-                            test_source_file = server.server_path + folder_rule.path + os.sep + file_uncompressed
-                            
+                            test_source_file = server.server_path + folder_rule.path + remove_prefix(root, folder_path) + os.sep + file_uncompressed
                             if os.path.exists(test_source_file) and os.path.isfile(test_source_file):
                                 file_exists_on_server = True
+                                break
 
                         if not file_exists_on_server:
                             os.remove(fastdl_file)
