@@ -167,7 +167,7 @@ def main():
     # Delete old files that no longer exist on any server as sourcefile
     for fastdl, servers in server_fastdl_mappings.items():
         # Get mod rules
-        mod_rules = mod_rules_dict[Mod.CSGO]
+        mod_rules = mod_rules_dict[fastdl.mod]
 
         for folder_rule in mod_rules.folder_rules:
             folder_path = fastdl.fastdl_path + folder_rule.path
