@@ -37,6 +37,11 @@ class Server:
         self.mod = mod
         self.server_path = server_path
 
+class FastDL:
+    def __init__(self, mod, fastdl_path):
+        self.mod = mod
+        self.fastdl_path = fastdl_path
+
 class ModRules:
     def __init__(self, mod, folder_rules):
         self.mod = mod
@@ -57,13 +62,14 @@ def main():
     # TODO: add to config file
     test_server_1 = Server(Mod.CSGO, 'C:\\Games\\SteamDev\\pyFastDL Testing\\server1\\csgo')
     test_server_2 = Server(Mod.CSGO, 'C:\\Games\\SteamDev\\pyFastDL Testing\\server2\\csgo')
-    
+    test_fastdl = FastDL(Mod.CSGO, 'C:\\Games\\SteamDev\\pyFastDL Testing\\fastdl.example.com\\csgo')
+
     server_fastdl_mappings = {}
-    server_fastdl_mappings.setdefault('C:\\Games\\SteamDev\\pyFastDL Testing\\fastdl.example.com\\csgo', []).append(test_server_1)
-    server_fastdl_mappings.setdefault('C:\\Games\\SteamDev\\pyFastDL Testing\\fastdl.example.com\\csgo', []).append(test_server_2)
+    server_fastdl_mappings.setdefault(test_fastdl, []).append(test_server_1)
+    server_fastdl_mappings.setdefault(test_fastdl, []).append(test_server_2)
 
     # Loop over servers
-    for fastdl_path, servers in server_fastdl_mappings.items():
+    for fastdl, servers in server_fastdl_mappings.items():
         for server in servers:
 
             # Get mod rules
@@ -109,7 +115,7 @@ def main():
                             # Check extension whitelist 
                             if any(file.endswith(ext) for ext in folder_rule.extention_whitelist):
                                 # Check if file exists at target
-                                target_path = fastdl_path + folder_rule.path + remove_prefix(root, folder_path) + os.sep + file
+                                target_path = fastdl.fastdl_path + folder_rule.path + remove_prefix(root, folder_path) + os.sep + file
                                 target_path_bzipped = target_path + '.bz2'
 
                                 # Only Compress files <= 150MB with bzip2, otherwise leave them raw
@@ -157,6 +163,40 @@ def main():
                         
                 else:
                     root, subdirs, files = next(os.walk(folder_path))
+
+    # Delete old files that no longer exist on any server as sourcefile
+    for fastdl, servers in server_fastdl_mappings.items():
+        # Get mod rules
+        mod_rules = mod_rules_dict[Mod.CSGO]
+
+        for folder_rule in mod_rules.folder_rules:
+            folder_path = fastdl.fastdl_path + folder_rule.path
+
+            # Check that path exists
+            if not os.path.isdir(folder_path) and not os.path.exists(folder_path):
+                print(f'Folder path dir "{folder_path}" does not exist')
+                continue
+
+            # Iterate over files in folder
+            if folder_rule.expand_recursively:
+                for root, subdirs, files in os.walk(folder_path):
+                    for file in files:
+                        fastdl_file = root + os.sep + file
+
+                        file_uncompressed = file
+                        if file_uncompressed.endswith('.bz2'):
+                            file_uncompressed = file_uncompressed[:-4]
+                        
+                        file_exists_on_server = False
+
+                        for server in servers:
+                            test_source_file = server.server_path + folder_rule.path + os.sep + file_uncompressed
+                            
+                            if os.path.exists(test_source_file) and os.path.isfile(test_source_file):
+                                file_exists_on_server = True
+
+                        if not file_exists_on_server:
+                            os.remove(fastdl_file)
 
 def remove_prefix(text, prefix):
     return text[len(prefix):] if text.startswith(prefix) else text
