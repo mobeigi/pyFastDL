@@ -20,6 +20,7 @@ import os
 from enum import IntEnum
 import bz2
 import shutil
+import hashlib
 
 # Globals
 mod_rules_dict = {}
@@ -31,11 +32,10 @@ class Mod(IntEnum):
     CSGO = 1
 
 # Classes
-class ServerFastDLMapping:
-    def __init__(self, mod, server_path, fastdl_path):
+class Server:
+    def __init__(self, mod, server_path):
         self.mod = mod
         self.server_path = server_path
-        self.fastdl_path = fastdl_path
 
 class ModRules:
     def __init__(self, mod, folder_rules):
@@ -55,84 +55,119 @@ def main():
 
     # Set server folders 
     # TODO: add to config file
-    test_offline = ServerFastDLMapping(Mod.CSGO, 'C:\Games\SteamDS\BYTE_OFFLINESERVER\csgo', 'C:\Games\SteamDS\TEMP_FASTDL\csgo')
-    server_fastdl_mappings = []
-    server_fastdl_mappings.append(test_offline)
+    test_server_1 = Server(Mod.CSGO, 'C:\\Games\\SteamDev\\pyFastDL Testing\\server1\\csgo')
+    test_server_2 = Server(Mod.CSGO, 'C:\\Games\\SteamDev\\pyFastDL Testing\\server2\\csgo')
+    
+    server_fastdl_mappings = {}
+    server_fastdl_mappings.setdefault('C:\\Games\\SteamDev\\pyFastDL Testing\\fastdl.example.com\\csgo', []).append(test_server_1)
+    server_fastdl_mappings.setdefault('C:\\Games\\SteamDev\\pyFastDL Testing\\fastdl.example.com\\csgo', []).append(test_server_2)
 
-    # Loop over mappings
-    for mapping in server_fastdl_mappings:
-        # Get mod rules
-        mod_rules = mod_rules_dict[mapping.mod]
+    # Loop over servers
+    for fastdl_path, servers in server_fastdl_mappings.items():
+        for server in servers:
 
-        for folder_rule in mod_rules.folder_rules:
-            folder_path = mapping.server_path + folder_rule.path
+            # Get mod rules
+            mod_rules = mod_rules_dict[server.mod]
 
-            # Check that path exists
-            if not os.path.isdir(folder_path) and not os.path.exists(folder_path):
-                print(f'Folder path dir "{folder_path}" does not exist')
-                continue
+            for folder_rule in mod_rules.folder_rules:
+                folder_path = server.server_path + folder_rule.path
 
-            # Iterate over files in folder
-            if folder_rule.expand_recursively:
-                for root, subdirs, files in os.walk(folder_path):
-                    for file in files:
-                        source_file = root + os.sep + file
-                        source_file_mtime = os.path.getmtime(source_file)
+                # Check that path exists
+                if not os.path.isdir(folder_path) and not os.path.exists(folder_path):
+                    print(f'Folder path dir "{folder_path}" does not exist')
+                    continue
 
-                        # Check extension whitelist 
-                        if any(file.endswith(ext) for ext in folder_rule.extention_whitelist):
-                            # Check if file exists at target
-                            target_path = mapping.fastdl_path + folder_rule.path + remove_prefix(root, folder_path) + os.sep + file
-                            target_path_bzipped = target_path + '.bz2'
+                # Iterate over files in folder
+                if folder_rule.expand_recursively:
+                    for root, subdirs, files in os.walk(folder_path):
+                        for file in files:
+                            source_file = root + os.sep + file
 
-                            # Only Compress files <= 150MB with bzip2, otherwise leave them raw
-                            source_file_size = os.stat(source_file).st_size
-                            dest_file = target_path_bzipped if MIN_FILE_SIZE_TO_BZIP < source_file_size < MAX_FILE_SIZE_TO_BZIP else target_path
-                            
-                            # If file exists, we should check if we need to update it
-                            if os.path.exists(dest_file):
-                                # Compare target files timestamp with our timestamp
-                                dest_file_mtime = os.path.getmtime(dest_file)
+                            # Ensure checksum for this file is the same for all servers mapped to the same fastdl folder
+                            # Otherwise, we have to fail as we don't know which file we should use
+                            source_file_md5 = md5sum(source_file)
 
-                                # Treat files with same modified date as identical (in lieu of expensive checksum check)
-                                if source_file_mtime == dest_file_mtime:
+                            checksum_ok = True
+                            for s in servers:
+                                # Ignore current server
+                                if s == server:
                                     continue
+                                
+                                test_source_file = s.server_path + folder_rule.path + os.sep + file
+                                if os.path.exists(test_source_file) and os.path.isfile(test_source_file):
+                                    test_source_file_md5 = md5sum(test_source_file)
+                                    if test_source_file_md5 != source_file_md5:
+                                        print(f'Error checksum mismatch for file "{source_file}" [MD5: {source_file_md5}] and "{test_source_file}" [MD5: {test_source_file_md5}].')
+                                        checksum_ok = False
 
-                            # Delete old files if they exist (raw and/or compressed)
-                            if os.path.exists(target_path_bzipped) and os.path.isfile(target_path_bzipped):
-                                os.remove(target_path_bzipped)
-                            elif os.path.exists(target_path) and os.path.isfile(target_path):
-                                os.remove(target_path)
+                            if not checksum_ok:
+                                break
 
-                            # Make required directories
-                            os.makedirs(os.path.dirname(dest_file), exist_ok=True)
+                            # Save source files modified time
+                            source_file_mtime = os.path.getmtime(source_file)
 
-                            # At this point, we can update the file
-                            if dest_file == target_path_bzipped:
-                                compressor = bz2.BZ2Compressor(9)
+                            # Check extension whitelist 
+                            if any(file.endswith(ext) for ext in folder_rule.extention_whitelist):
+                                # Check if file exists at target
+                                target_path = fastdl_path + folder_rule.path + remove_prefix(root, folder_path) + os.sep + file
+                                target_path_bzipped = target_path + '.bz2'
 
-                                f_source = open(source_file, 'rb')
-                                f_dest = open(dest_file, 'wb+')
+                                # Only Compress files <= 150MB with bzip2, otherwise leave them raw
+                                source_file_size = os.stat(source_file).st_size
+                                dest_file = target_path_bzipped if MIN_FILE_SIZE_TO_BZIP < source_file_size < MAX_FILE_SIZE_TO_BZIP else target_path
+                                
+                                # If file exists, we should check if we need to update it
+                                if os.path.exists(dest_file):
+                                    # Compare target files timestamp with our timestamp
+                                    dest_file_mtime = os.path.getmtime(dest_file)
 
-                                while True:
-                                    data = f_source.read(1024)
-                                    if not data:
-                                        break
-                                    cdata = compressor.compress(data)
-                                    f_dest.write(cdata)
+                                    # Treat files with same modified time as identical (to avoid storing checksums/uncompressing to compare checksums etc)
+                                    if source_file_mtime == dest_file_mtime:
+                                        continue
 
-                                f_dest.write(compressor.flush())
-                            else:
-                                shutil.copyfile(source_file, dest_file)
+                                # Delete old files if they exist (raw and/or compressed)
+                                if os.path.exists(target_path_bzipped) and os.path.isfile(target_path_bzipped):
+                                    os.remove(target_path_bzipped)
+                                elif os.path.exists(target_path) and os.path.isfile(target_path):
+                                    os.remove(target_path)
 
-                            # Copy over modified time
-                            os.utime(dest_file, (source_file_mtime, source_file_mtime))
-                    
-            else:
-                root, subdirs, files = next(os.walk(folder_path))
+                                # Make required directories
+                                os.makedirs(os.path.dirname(dest_file), exist_ok=True)
+
+                                # At this point, we can update the file
+                                if dest_file == target_path_bzipped:
+                                    compressor = bz2.BZ2Compressor(9)
+
+                                    f_source = open(source_file, 'rb')
+                                    f_dest = open(dest_file, 'wb+')
+
+                                    while True:
+                                        data = f_source.read(1024)
+                                        if not data:
+                                            break
+                                        cdata = compressor.compress(data)
+                                        f_dest.write(cdata)
+
+                                    f_dest.write(compressor.flush())
+                                else:
+                                    shutil.copyfile(source_file, dest_file)
+
+                                # Copy over modified time
+                                os.utime(dest_file, (source_file_mtime, source_file_mtime))
+                        
+                else:
+                    root, subdirs, files = next(os.walk(folder_path))
 
 def remove_prefix(text, prefix):
     return text[len(prefix):] if text.startswith(prefix) else text
+
+# Source: https://stackoverflow.com/a/21565932/1800854
+def md5sum(filename, blocksize=65536):
+    hash = hashlib.md5()
+    with open(filename, "rb") as f:
+        for block in iter(lambda: f.read(blocksize), b""):
+            hash.update(block)
+    return hash.hexdigest()
 
 # Populate static data
 def populate_mod_rules():
